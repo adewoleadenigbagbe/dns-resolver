@@ -33,46 +33,58 @@ type answer struct {
 }
 
 func main() {
+	var (
+		err      error
+		query    string
+		response []byte
+	)
 	buf := new(bytes.Buffer)
-	query := buildQuery(buf)
-	sendQuery(query)
+	query, err = buildQuery(buf)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	response, err = sendQuery(query)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(response)
 }
 
-func buildQuery(buf *bytes.Buffer) string {
+func buildQuery(buf *bytes.Buffer) (string, error) {
 	var (
 		err error
 	)
 	h, err := encodeHeader(buf)
 
 	if err != nil {
-		log.Fatal(err)
+		return "", nil
 	}
 
 	q, err := encodeQuestion(buf)
 	if err != nil {
-		log.Fatal(err)
+		return "", nil
 	}
 
-	return h + q
+	return h + q, nil
 }
 
-func sendQuery(query string) {
+func sendQuery(query string) ([]byte, error) {
 	p := make([]byte, 1024)
 	conn, err := net.Dial("udp", "8.8.8.8:53")
+	defer conn.Close()
 	if err != nil {
-		fmt.Printf("Some error %v", err)
-		return
+		return nil, err
 	}
 
 	fmt.Fprintf(conn, query)
 	_, err = bufio.NewReader(conn).Read(p)
 
-	if err == nil {
-		fmt.Printf("%s\n", p)
-	} else {
-		fmt.Printf("Some error %v\n", err)
+	if err != nil {
+		return nil, err
 	}
-	conn.Close()
+	return p, nil
 }
 
 func encodeHeader(buf *bytes.Buffer) (string, error) {
