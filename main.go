@@ -16,12 +16,12 @@ const (
 )
 
 type header struct {
-	id      uint16
-	flags   int16
-	qdcount int16
-	ancount int16
-	nscount int16
-	arcount int16
+	Id      uint16
+	Flags   uint16
+	Qdcount int16
+	Ancount int16
+	Nscount int16
+	Arcount int16
 }
 
 type question struct {
@@ -29,7 +29,13 @@ type question struct {
 	qclass int16
 }
 
-type answer struct {
+type record struct {
+	Name     []byte
+	Type     uint16
+	Class    uint16
+	Ttl      uint32
+	RdLength uint16
+	RData    []byte
 }
 
 func main() {
@@ -49,7 +55,73 @@ func main() {
 		log.Fatal(err)
 	}
 
-	fmt.Println(response)
+	//fmt.Println(response)
+	resolveDns(buf, response)
+}
+
+func resolveDns(buf *bytes.Buffer, data []byte) ([]record, error) {
+	offset := 12
+	_, err := buf.Write(data[:offset])
+	if err != nil {
+		return nil, err
+	}
+
+	h := &header{}
+	binary.Read(buf, binary.BigEndian, h)
+	fmt.Println("nscount : ", h.Nscount)
+	var qr uint16 = 1 << 15
+
+	//qr is set to 0 which indicate (query:0) when sending, name server sets it to 1 which indicate (response:1)
+	if !(h.Flags&qr != 0) {
+		return nil, fmt.Errorf("expected response is 1 but got %d", h.Flags&qr)
+	}
+
+	//with the number of question sent to the name server
+	for i := 0; i < int(h.Qdcount); i++ {
+		for data[offset] != 0 {
+			offset += 1
+		}
+		//qclass + qtype is 32 bits (4 bytes), increment the offset by 4 plus 1 = 5 which is the dermacated byte when found
+		offset += 5
+	}
+
+	buf.Reset()
+
+	answerRecords := make([]record, h.Ancount)
+	for i := 0; i < int(h.Ancount); i++ {
+		//skip for the name
+		offset += 2
+
+		answerRecords[i].Type = binary.BigEndian.Uint16(data[offset : offset+2])
+		offset += 2
+
+		answerRecords[i].Class = binary.BigEndian.Uint16(data[offset : offset+2])
+		offset += 2
+
+		answerRecords[i].Ttl = binary.BigEndian.Uint32(data[offset : offset+4])
+		offset += 4
+
+		answerRecords[i].RdLength = binary.BigEndian.Uint16(data[offset : offset+2])
+		offset += 2
+
+		answerRecords[i].RData = data[offset : offset+int(answerRecords[i].RdLength)]
+		offset += int(answerRecords[i].RdLength)
+	}
+
+	if len(answerRecords) > 0 {
+		buf.Reset()
+		return answerRecords, nil
+	}
+
+	for i := 0; i < int(h.Nscount); i++ {
+
+	}
+
+	return answerRecords, nil
+}
+
+func parseRecordSection() {
+
 }
 
 func buildQuery(buf *bytes.Buffer) (string, error) {
@@ -89,14 +161,13 @@ func sendQuery(query string) ([]byte, error) {
 
 func encodeHeader(buf *bytes.Buffer) (string, error) {
 	h := &header{
-		id:      uint16(rand.Intn(65536)),
-		flags:   0x100, // standard query with recursion desired
-		qdcount: 1,
-		ancount: 0,
-		nscount: 0,
-		arcount: 0,
+		Id:      uint16(rand.Intn(65536)),
+		Flags:   0x100, // standard query with recursion desired
+		Qdcount: 1,
+		Ancount: 0,
+		Nscount: 0,
+		Arcount: 0,
 	}
-
 	err := binary.Write(buf, binary.BigEndian, h)
 	if err != nil {
 		return "", err
@@ -113,6 +184,7 @@ func encodeQuestion(buf *bytes.Buffer) (string, error) {
 		b := byte(uint8(len(part)))
 		encoded += string(b) + part
 	}
+	//append with zero, this dermacate name to be resolved , in case you have multiple names
 	encoded += string(byte(0))
 
 	q := &question{
