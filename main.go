@@ -8,6 +8,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -30,7 +31,7 @@ type question struct {
 }
 
 type record struct {
-	Name     []byte
+	Name     string
 	Type     uint16
 	Class    uint16
 	Ttl      uint32
@@ -50,16 +51,22 @@ func main() {
 		log.Fatal(err)
 	}
 
-	response, err = sendQuery(query)
+	response, err = sendQuery(query, "8.8.8.8:53")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//fmt.Println(response)
-	resolveDns(buf, response)
+	var records []string
+	records, err = resolveDns(buf, response)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println(records)
+
 }
 
-func resolveDns(buf *bytes.Buffer, data []byte) ([]record, error) {
+func resolveDns(buf *bytes.Buffer, data []byte) ([]string, error) {
 	offset := 12
 	_, err := buf.Write(data[:offset])
 	if err != nil {
@@ -68,7 +75,7 @@ func resolveDns(buf *bytes.Buffer, data []byte) ([]record, error) {
 
 	h := &header{}
 	binary.Read(buf, binary.BigEndian, h)
-	fmt.Println("nscount : ", h.Nscount)
+
 	var qr uint16 = 1 << 15
 
 	//qr is set to 0 which indicate (query:0) when sending, name server sets it to 1 which indicate (response:1)
@@ -87,41 +94,86 @@ func resolveDns(buf *bytes.Buffer, data []byte) ([]record, error) {
 
 	buf.Reset()
 
-	answerRecords := make([]record, h.Ancount)
+	var answerRecords []string
 	for i := 0; i < int(h.Ancount); i++ {
-		//skip for the name
-		offset += 2
-
-		answerRecords[i].Type = binary.BigEndian.Uint16(data[offset : offset+2])
-		offset += 2
-
-		answerRecords[i].Class = binary.BigEndian.Uint16(data[offset : offset+2])
-		offset += 2
-
-		answerRecords[i].Ttl = binary.BigEndian.Uint32(data[offset : offset+4])
-		offset += 4
-
-		answerRecords[i].RdLength = binary.BigEndian.Uint16(data[offset : offset+2])
-		offset += 2
-
-		answerRecords[i].RData = data[offset : offset+int(answerRecords[i].RdLength)]
-		offset += int(answerRecords[i].RdLength)
+		r, newOffset := parseRecordSection(buf, data, offset, h.Qdcount)
+		if r.Type == 1 {
+			var ip string
+			for _, r := range r.RData {
+				ip += strconv.Itoa(int(r)) + "."
+			}
+			ip = ip[:len(ip)-1]
+			answerRecords = append(answerRecords, ip)
+		}
+		offset = newOffset
 	}
 
 	if len(answerRecords) > 0 {
-		buf.Reset()
 		return answerRecords, nil
 	}
 
-	for i := 0; i < int(h.Nscount); i++ {
+	// var nsRecords []string
+	// for i := 0; i < int(h.Nscount); i++ {
+	// 	r := parseRecordSection(buf, data, &offset)
+	// 	if r.Type == 2 {
+	// 		var ip string
+	// 		for _, r := range r.RData {
+	// 			ip += strconv.Itoa(int(r)) + "."
+	// 		}
+	// 		ip = ip[:len(ip)-1]
+	// 		nsRecords = append(nsRecords, ip)
+	// 	}
+	// }
 
-	}
-
-	return answerRecords, nil
+	return nil, nil
 }
 
-func parseRecordSection() {
+func parseRecordSection(buf *bytes.Buffer, data []byte, offset int, questionCount int16) (record, int) {
+	var r record
+	//check if there is a message compression which is 2 bytes data by checking whether it has a pointer
+	//Ex: if the binary format is 110001111, the first two bit start with 11 makes it a pointer , hence a message compression
+	b := fmt.Sprintf("%b", data[offset])
+	pointer := b[:2]
+	if pointer == "11" {
+		b = b[2:] + fmt.Sprintf("%b", data[offset+1])
+		qNameOffset, _ := strconv.ParseInt(b, 2, 64)
 
+		var name string
+		for i := 0; i < int(questionCount); i++ {
+			for data[qNameOffset] != 0 {
+				if data[qNameOffset] > 47 && data[qNameOffset] < 123 {
+					name += string(data[qNameOffset])
+				} else {
+					name += "."
+				}
+				qNameOffset += 1
+			}
+			r.Name = name[1:]
+			qNameOffset += 5
+		}
+
+	} else {
+	}
+
+	offset += 2
+
+	r.Type = binary.BigEndian.Uint16(data[offset : offset+2])
+	offset += 2
+
+	r.Class = binary.BigEndian.Uint16(data[offset : offset+2])
+	offset += 2
+
+	r.Ttl = binary.BigEndian.Uint32(data[offset : offset+4])
+	offset += 4
+
+	r.RdLength = binary.BigEndian.Uint16(data[offset : offset+2])
+	offset += 2
+
+	r.RData = data[offset : offset+int(r.RdLength)]
+	offset += int(r.RdLength)
+
+	buf.Reset()
+	return r, offset
 }
 
 func buildQuery(buf *bytes.Buffer) (string, error) {
@@ -142,9 +194,9 @@ func buildQuery(buf *bytes.Buffer) (string, error) {
 	return h + q, nil
 }
 
-func sendQuery(query string) ([]byte, error) {
+func sendQuery(query string, ipAddress string) ([]byte, error) {
 	p := make([]byte, 1024)
-	conn, err := net.Dial("udp", "8.8.8.8:53")
+	conn, err := net.Dial("udp", ipAddress)
 	defer conn.Close()
 	if err != nil {
 		return nil, err
