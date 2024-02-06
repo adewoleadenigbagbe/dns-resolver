@@ -40,35 +40,29 @@ type record struct {
 }
 
 func main() {
-	var (
-		err      error
-		query    string
-		response []byte
-	)
 	buf := new(bytes.Buffer)
-	query, err = buildQuery(buf)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	response, err = sendQuery(query, "8.8.8.8:53")
-	if err != nil {
-		log.Fatal(err)
-	}
-
 	var records []string
-	records, err = resolveDns(buf, response)
+	records, err := resolveDns(buf, "198.41.0.4", ":53")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	fmt.Println(records)
-
 }
 
-func resolveDns(buf *bytes.Buffer, data []byte) ([]string, error) {
+func resolveDns(buf *bytes.Buffer, nameServer string, port string) ([]string, error) {
+	query, err := buildQuery(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := sendQuery(query, nameServer, port)
+	if err != nil {
+		return nil, err
+	}
+
 	offset := 12
-	_, err := buf.Write(data[:offset])
+	_, err = buf.Write(data[:offset])
 	if err != nil {
 		return nil, err
 	}
@@ -112,18 +106,34 @@ func resolveDns(buf *bytes.Buffer, data []byte) ([]string, error) {
 		return answerRecords, nil
 	}
 
-	// var nsRecords []string
-	// for i := 0; i < int(h.Nscount); i++ {
-	// 	r := parseRecordSection(buf, data, &offset)
-	// 	if r.Type == 2 {
-	// 		var ip string
-	// 		for _, r := range r.RData {
-	// 			ip += strconv.Itoa(int(r)) + "."
-	// 		}
-	// 		ip = ip[:len(ip)-1]
-	// 		nsRecords = append(nsRecords, ip)
-	// 	}
-	// }
+	var nsRecords []string
+	for i := 0; i < int(h.Nscount); i++ {
+		r, newOffset := parseRecordSection(buf, data, offset, h.Qdcount)
+		if r.Type == 2 {
+			var ip string
+			for _, r := range r.RData {
+				ip += strconv.Itoa(int(r)) + "."
+			}
+			ip = ip[:len(ip)-1]
+			nsRecords = append(nsRecords, ip)
+		}
+		offset = newOffset
+	}
+
+	for i := 0; i < int(h.Arcount); i++ {
+		r, newOffset := parseRecordSection(buf, data, offset, h.Qdcount)
+		if r.Type == 1 {
+			var ip string
+			for _, r := range r.RData {
+				ip += strconv.Itoa(int(r)) + "."
+			}
+			ip = ip[:len(ip)-1]
+			return resolveDns(buf, ip, ":53")
+		}
+		offset = newOffset
+	}
+
+	buf.Reset()
 
 	return nil, nil
 }
@@ -194,9 +204,9 @@ func buildQuery(buf *bytes.Buffer) (string, error) {
 	return h + q, nil
 }
 
-func sendQuery(query string, ipAddress string) ([]byte, error) {
+func sendQuery(query string, ipAddress string, port string) ([]byte, error) {
 	p := make([]byte, 1024)
-	conn, err := net.Dial("udp", ipAddress)
+	conn, err := net.Dial("udp", ipAddress+port)
 	defer conn.Close()
 	if err != nil {
 		return nil, err
