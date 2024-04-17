@@ -13,11 +13,11 @@ DNS which means Domain Name system , when you type a url in your browser, some a
 
 For more information on dns resolver, visit this links below
 
-[WizardZines](https://wizardzines.com/comics/cast-of-characters/) - A visual comic of how DNS resolver work by Julia Evans
+* [WizardZines](https://wizardzines.com/comics/cast-of-characters/) - A visual comic of how DNS resolver work by Julia Evans
 
-[Wikipedia](https://en.wikipedia.org/wiki/Domain_Name_System) - Wiki info
+* [Wikipedia](https://en.wikipedia.org/wiki/Domain_Name_System) - Wiki info
 
-[Rfc1035](https://datatracker.ietf.org/doc/html/rfc1035) - Rfc standard on how resolver needs to be built
+* [Rfc1035](https://datatracker.ietf.org/doc/html/rfc1035) - Rfc standard on how resolver needs to be built
 
 ## Usage
 
